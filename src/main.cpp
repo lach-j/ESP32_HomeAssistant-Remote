@@ -2,8 +2,7 @@
 #include <PubSubClient.h>
 #include <Wire.h>
 
-const char *ssid = "<SSID>";
-const char *password = "<PASSWORD>";
+#define HAS_ROTARY false
 
 const char *mqtt_server = "192.168.---.---";
 
@@ -16,13 +15,15 @@ unsigned long lastMsg = 0;
 char msg[50];
 int value = 0;
 
+#if HAS_ROTARY
 bool rotary_has_update = false;
 
-const int outputA = 25;
-const int outputB = 26;
+const int outputA = 34;
+const int outputB = 35;
 
 int counter = 0;
 int aLastState;
+#endif
 
 void setup_wifi() {
     delay(10);
@@ -59,6 +60,7 @@ void callback(char *topic, byte *message, unsigned int length) {
 
 void registerEntities() {
 
+#if HAS_ROTARY
     char rotary_payload[100];
     snprintf(rotary_payload, sizeof(rotary_payload),
              R"({"name":"ESP32 Rotary","state_topic":"%s", "unique_id": "esp32_rotary"})", rotary_topic);
@@ -67,6 +69,7 @@ void registerEntities() {
             "homeassistant/sensor/esp32_rotary/config",
             rotary_payload
     );
+#endif
 
     for (int i = 1; i <= 9; i++) {
         delay(100);
@@ -75,15 +78,9 @@ void registerEntities() {
                  R"({"name":"ESP32 Button %d","state_topic":"%s_%d/state","unique_id":"esp32_button_%d"})", i,
                  button_topic, i, i);
 
-        Serial.print("PAYLOAD: ");
-        Serial.println(button_payload);
-
         char button_config_topic[100];
         snprintf(button_config_topic, sizeof(button_config_topic),
                  "homeassistant/binary_sensor/esp32_rotary_click_%d/config", i);
-
-        Serial.print("TOPIC: ");
-        Serial.println(button_config_topic);
 
         client.publish(
                 button_config_topic,
@@ -122,22 +119,18 @@ byte lastKeys[colCount][rowCount];
 bool hasPendingPublish[colCount][rowCount];
 
 void setup_button_matrix() {
-    for (int x = 0; x < rowCount; x++) {
-        Serial.print(rows[x]);
-        Serial.println(" as input");
-        pinMode(rows[x], INPUT);
+    for (unsigned char row : rows) {
+        pinMode(row, INPUT);
     }
 
-    for (int x = 0; x < colCount; x++) {
-        Serial.print(cols[x]);
-        Serial.println(" as input-pullup");
-        pinMode(cols[x], INPUT_PULLUP);
+    for (unsigned char col : cols) {
+        pinMode(col, INPUT_PULLUP);
     }
 
     for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-        for (int colIndex = 0; colIndex < colCount; colIndex++) {
-            hasPendingPublish[colIndex][rowIndex] = false;
-        }
+        for (auto & colIndex : hasPendingPublish)
+            colIndex[rowIndex] = false;
+
     }
 }
 
@@ -160,24 +153,17 @@ void readMatrix() {
 
 void setup() {
     setup_button_matrix();
-
+#if HAS_ROTARY
     pinMode(outputA, INPUT);
     pinMode(outputB, INPUT);
 
     aLastState = digitalRead(outputA);
-
+#endif
     Serial.begin(115200);
 
     setup_wifi();
     client.setServer(mqtt_server, 1883);
     client.setCallback(callback);
-}
-
-void publishRotaryUpdate() {
-    char buffer[3];
-    itoa(counter, buffer, 10);
-    client.publish(rotary_topic, buffer);
-    rotary_has_update = false;
 }
 
 void publishButtonUpdate(int buttonNum) {
@@ -186,6 +172,14 @@ void publishButtonUpdate(int buttonNum) {
 
     client.publish(button_state_topic, "ON");
     client.publish(button_state_topic, "OFF");
+}
+
+#if HAS_ROTARY
+void publishRotaryUpdate() {
+    char buffer[3];
+    itoa(counter, buffer, 10);
+    client.publish(rotary_topic, buffer);
+    rotary_has_update = false;
 }
 
 void checkEncoderState() {
@@ -197,7 +191,7 @@ void checkEncoderState() {
                 rotary_has_update = true;
             }
         } else {
-            if (counter > 0) {
+            if (counter > 1) {
                 counter--;
                 rotary_has_update = true;
             }
@@ -205,6 +199,8 @@ void checkEncoderState() {
     }
     aLastState = aState;
 }
+
+#endif
 
 void printMatrix() {
     for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {
@@ -229,17 +225,19 @@ void loop() {
 
     readMatrix();
     printMatrix();
+#if HAS_ROTARY
     checkEncoderState();
+#endif
 
     const unsigned long DELAY_TIME = 1000;
 
     unsigned long now = millis();
     if (now - lastMsg > DELAY_TIME) {
         lastMsg = now;
-
+#if HAS_ROTARY
         if (rotary_has_update)
             publishRotaryUpdate();
-
+#endif
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {
             for (int colIndex = 0; colIndex < colCount; colIndex++) {
                 if (hasPendingPublish[colIndex][rowIndex]) {
